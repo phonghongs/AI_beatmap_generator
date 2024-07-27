@@ -3,6 +3,7 @@ __MACOSX
 .ipynb_checkpoints
 *.json
 *.mc
+Dataset
 generated-with-ai.mcz
 0/
 __pycache__/

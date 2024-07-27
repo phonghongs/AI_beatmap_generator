@@ -8,7 +8,7 @@ with open("dataset.json", "r") as f:
 X0 = dataset['X0']
 Y0 = dataset['Y0']
 
-hidden_size = 128
+hidden_size = 256
 encoder_f = EncoderRNN(hidden_size).to(device)  # 前向
 encoder_b = EncoderRNN(hidden_size).to(device)  # 逆向
 cls_layer = OutPutLayer(hidden_size, 2).to(device)
@@ -24,7 +24,7 @@ SOS_token = 0
 
 for epoch in range(20):
     total_loss = 0
-    for i in range(1000):
+    for i in range(10000):
         index = random.randrange(0, len(X0))
         x0 = torch.from_numpy(np.array(X0[index])).to(device).float()
         y0 = torch.from_numpy(np.array(Y0[index])).to(device).long()

@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import os
 import numpy as np
 
-device = torch.device("cpu")
+device = torch.device("cuda")
 
 Feature_DIM = 64
 

@@ -4,7 +4,7 @@ import json
 import librosa
 import numpy as np
 
-mcz_files = os.listdir("original_beatmaps")
+mcz_files = os.listdir("Dataset/mcz-output")
 
 def load_audio(audio_file):
     x , sr = librosa.load(audio_file, sr=20000)
@@ -57,8 +57,7 @@ def get_columns_list(notes):
     columns = {
         0: {},
         1: {},
-        2: {},
-        3: {}
+        2: {}
     }
 
     for note in notes:
@@ -68,9 +67,9 @@ def get_columns_list(notes):
             split_count = note['beat'][2]
             if split_count == 8:
                 if (len(columns[0]) != 0) and (len(columns[1]) != 0) \
-                    and (len(columns[2]) != 0)and (len(columns[3]) != 0):
+                    and (len(columns[2]) != 0):
                     columns_list.append(columns)
-                    columns = {0: {}, 1: {}, 2: {}, 3: {}}
+                    columns = {0: {}, 1: {}, 2: {}}
                 continue
             if split_count != 4:
                 if sub_beat == 0:
@@ -87,9 +86,9 @@ def get_columns_list(notes):
                     split_count *= 4
                 elif split_count != 4:
                     if (len(columns[0]) != 0) and (len(columns[1]) != 0) \
-                        and (len(columns[2]) != 0)and (len(columns[3]) != 0):
+                        and (len(columns[2]) != 0):
                         columns_list.append(columns)
-                        columns = {0: {}, 1: {}, 2: {}, 3: {}}
+                        columns = {0: {}, 1: {}, 2: {}}
                     continue
 
             position = beat * 4 + sub_beat
@@ -105,9 +104,9 @@ def get_columns_list(notes):
                 columns[which_col][position] = 1
     
     if (len(columns[0]) != 0) and (len(columns[1]) != 0) \
-        and (len(columns[2]) != 0)and (len(columns[3]) != 0):
+        and (len(columns[2]) != 0):
         columns_list.append(columns)
-        columns = {0: {}, 1: {}, 2: {}, 3: {}}
+        columns = {0: {}, 1: {}, 2: {}}
 
     return columns_list
 
@@ -177,14 +176,6 @@ def get_one_data(start, end, columns, bpm, x_, sr, offset):
                 has_ln = True
                 long_note_count += 2*2
         
-        # column 3
-        if i in columns[3]:
-            if columns[3][i] == 1:
-                has_beat = True
-                beat_count += 2*2*2
-            else:
-                has_ln = True
-                long_note_count += 2*2*2
         
         y0.append(int(has_beat))
         
@@ -216,7 +207,7 @@ for mcz_file in mcz_files:
     if ".mcz" not in mcz_file:
         continue
     print(count, mcz_file)
-    zFile = zipfile.ZipFile("original_beatmaps/" + mcz_file, "r")
+    zFile = zipfile.ZipFile("Dataset/mcz-output/" + mcz_file, "r")
     audio_file = ""
     mc_file = ""
     mc_data = {}
@@ -260,7 +251,6 @@ for mcz_file in mcz_files:
                     X1.append(x1)
                     Y1.append(y1)
                 
-                
                 if len(y3) > 0:
                     X2.append(x2)
                     Y2.append(y2)
@@ -275,3 +265,31 @@ for mcz_file in mcz_files:
             
 #     break
     count += 1
+
+
+with open("dataset.json", "w") as f:
+    json.dump({
+        "X0": X0,
+        "Y0": Y0,
+        "X1": X1,
+        "Y1": Y1,
+        "X2": X2,
+        "Y2": Y2,
+        "X3": X3,
+        "Y3": Y3,
+    }, f)
+
+with open("glove/malody.txt", "w") as f:
+    for y1 in Y1:
+        strs = [str(i) for i in y1]
+        line = " ".join(strs)
+        print(line)
+        f.write(line + "\n")
+
+with open("glove/malody2.txt", "w") as f:
+    for y3 in Y3:
+        strs = [str(i) for i in y3]
+        if len(strs) > 0:
+            line = " ".join(strs)
+            print(line)
+            f.write(line + "\n")
