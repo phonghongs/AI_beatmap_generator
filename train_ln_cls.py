@@ -1,81 +1,180 @@
 import json
+import numpy as np
+import torch
 from torch import optim
 import random
-from model import *
+from model import EncoderRNN, OutPutLayer, device
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.utils.tensorboard import SummaryWriter
+import os
+import shutil
 
-with open("dataset.json", "r") as f:
-    dataset = json.load(f)
-X0 = dataset['X2']
-Y0 = dataset['Y2']
+def load_dataset(file_path):
+    with open(file_path, "r") as f:
+        dataset = json.load(f)
+    return dataset['X2'], dataset['Y2']
 
+def init_models(hidden_size):
+    encoder_f = EncoderRNN(hidden_size).to(device)
+    encoder_b = EncoderRNN(hidden_size).to(device)
+    cls_layer = OutPutLayer(hidden_size, 2).to(device)
+    return encoder_f, encoder_b, cls_layer
 
-hidden_size = 128
-encoder_f = EncoderRNN(hidden_size).to(device)  # 前向
-encoder_b = EncoderRNN(hidden_size).to(device)  # 逆向
-cls_layer = OutPutLayer(hidden_size, 2).to(device)
+def init_optimizers(models, learning_rate):
+    return [optim.Adam(model.parameters(), lr=learning_rate) for model in models]
 
-learning_rate = 1e-3
-encoder_optimizer = optim.Adam(encoder_f.parameters(), lr=learning_rate)
-encoder_optimizer2 = optim.Adam(encoder_b.parameters(), lr=learning_rate)
-cls_layer_optimizer = optim.Adam(cls_layer.parameters(), lr=learning_rate)
-
-
-SOS_token = 0
-
-
-for epoch in range(20):
+def train_epoch(encoder_f, encoder_b, cls_layer, X, Y, optimizers, batch_size):
+    encoder_f.train()
+    encoder_b.train()
+    cls_layer.train()
+    
     total_loss = 0
-    for i in range(1000):
-        index = random.randrange(0, len(X0))
-        x0 = torch.from_numpy(np.array(X0[index])).to(device).float()
-        y0 = torch.from_numpy(np.array(Y0[index])).to(device).long()
+    for i in range(batch_size):
+        index = random.randrange(0, len(X))
+        x0 = torch.from_numpy(np.array(X[index])).to(device).float()
+        y0 = torch.from_numpy(np.array(Y[index])).to(device).long()
 
-        max_length = len(X0[index])
+        max_length = len(X[index])
 
-        encoder_optimizer.zero_grad()
-        encoder_optimizer2.zero_grad()
-        cls_layer_optimizer.zero_grad()
+        for optimizer in optimizers:
+            optimizer.zero_grad()
 
         encoder_f_outputs = torch.zeros(max_length, encoder_f.hidden_size, device=device)
         encoder_b_outputs = torch.zeros(max_length, encoder_b.hidden_size, device=device)
-        loss = 0
 
         encoder_f_hidden = encoder_f.initHidden()
+        encoder_b_hidden = encoder_b.initHidden()
+
         for ei in range(max_length):
-            # print(x[ei])
-            encoder_output, encoder_f_hidden = encoder_f(
-                x0[ei], encoder_f_hidden)
+            encoder_output, encoder_f_hidden = encoder_f(x0[ei], encoder_f_hidden)
             encoder_f_outputs[ei] = encoder_output[0, 0]
 
-        encoder_b_hidden = encoder_b.initHidden()
-        for ei in range(max_length):
-            # print(x[ei])
             encoder_output, encoder_b_hidden = encoder_b(
                 x0[max_length-ei-1], encoder_b_hidden)
             encoder_b_outputs[max_length-ei-1] = encoder_output[0, 0]
 
         encoder_outputs = torch.cat([encoder_f_outputs, encoder_b_outputs], dim=1)
 
-        # 判断是否有键
+        loss = 0
         for di in range(max_length):
             cls_input = encoder_outputs[di]
             cls_output = cls_layer(cls_input)
             target = y0[di].view(-1)
-
-            loss += F.nll_loss(cls_output, target)
+            loss += torch.nn.functional.nll_loss(cls_output, target)
 
         loss.backward()
-        encoder_optimizer.step()
-        encoder_optimizer2.step()
-        cls_layer_optimizer.step()
+        for optimizer in optimizers:
+            optimizer.step()
 
         total_loss += loss.item() / max_length
-        if i % 20 == 0:
+
+        if i % 100 == 0:
             avg_loss = total_loss / (i+1)
             now_loss = loss.item() / max_length
-            print(f"Epoch: {epoch},i: {i},avg_loss:{avg_loss},loss:{now_loss}")
+            print(f"Batch: {i}, Avg Loss: {avg_loss:.4f}, Current Loss: {now_loss:.4f}")
 
-    # save models
-    torch.save(encoder_f, f"checkpoints/encoder_ln1.pth")
-    torch.save(encoder_b, f"checkpoints/encoder_ln2.pth")
-    torch.save(cls_layer, f"checkpoints/ln_cls_layer.pth")
+    return total_loss / batch_size
+
+def validate(encoder_f, encoder_b, cls_layer, X, Y, batch_size):
+    encoder_f.eval()
+    encoder_b.eval()
+    cls_layer.eval()
+    
+    total_loss = 0
+    with torch.no_grad():
+        for i in range(batch_size):
+            index = random.randrange(0, len(X))
+            x0 = torch.from_numpy(np.array(X[index])).to(device).float()
+            y0 = torch.from_numpy(np.array(Y[index])).to(device).long()
+
+            max_length = len(X[index])
+
+            encoder_f_outputs = torch.zeros(max_length, encoder_f.hidden_size, device=device)
+            encoder_b_outputs = torch.zeros(max_length, encoder_b.hidden_size, device=device)
+
+            encoder_f_hidden = encoder_f.initHidden()
+            encoder_b_hidden = encoder_b.initHidden()
+
+            for ei in range(max_length):
+                encoder_output, encoder_f_hidden = encoder_f(x0[ei], encoder_f_hidden)
+                encoder_f_outputs[ei] = encoder_output[0, 0]
+
+                encoder_output, encoder_b_hidden = encoder_b(
+                    x0[max_length-ei-1], encoder_b_hidden)
+                encoder_b_outputs[max_length-ei-1] = encoder_output[0, 0]
+
+            encoder_outputs = torch.cat([encoder_f_outputs, encoder_b_outputs], dim=1)
+
+            loss = 0
+            for di in range(max_length):
+                cls_input = encoder_outputs[di]
+                cls_output = cls_layer(cls_input)
+                target = y0[di].view(-1)
+                loss += torch.nn.functional.nll_loss(cls_output, target)
+
+            total_loss += loss.item() / max_length
+
+    return total_loss / batch_size
+
+def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
+    torch.save(state, filename)
+    if is_best:
+        shutil.copyfile(filename, 'model_best.pth.tar')
+
+def main():
+    hidden_size = 512
+    learning_rate = 1e-3
+    num_epochs = 20
+    batch_size = 1000
+
+    X, Y = load_dataset("dataset.json")
+    train_size = int(0.8 * len(X))
+    X_train, X_val = X[:train_size], X[train_size:]
+    Y_train, Y_val = Y[:train_size], Y[train_size:]
+
+    encoder_f, encoder_b, cls_layer = init_models(hidden_size)
+    optimizers = init_optimizers([encoder_f, encoder_b, cls_layer], learning_rate)
+    scheduler = ReduceLROnPlateau(optimizers[0], 'min', patience=5)
+
+    writer = SummaryWriter()
+
+    best_val_loss = float('inf')
+
+    for epoch in range(num_epochs):
+        train_loss = train_epoch(encoder_f, encoder_b, cls_layer, X_train, Y_train, optimizers, batch_size)
+        val_loss = validate(encoder_f, encoder_b, cls_layer, X_val, Y_val, batch_size)
+
+        print(f"Epoch: {epoch}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+
+        writer.add_scalar('Loss/train', train_loss, epoch)
+        writer.add_scalar('Loss/val', val_loss, epoch)
+
+        scheduler.step(val_loss)
+
+        is_best = val_loss < best_val_loss
+        best_val_loss = min(val_loss, best_val_loss)
+
+        save_checkpoint({
+            'epoch': epoch + 1,
+            'encoder_f': encoder_f.state_dict(),
+            'encoder_b': encoder_b.state_dict(),
+            'cls_layer': cls_layer.state_dict(),
+            'best_val_loss': best_val_loss,
+            'optimizers': [opt.state_dict() for opt in optimizers],
+        }, is_best)
+
+    writer.close()
+
+    # Load best model
+    checkpoint = torch.load('model_best.pth.tar')
+    encoder_f.load_state_dict(checkpoint['encoder_f'])
+    encoder_b.load_state_dict(checkpoint['encoder_b'])
+    cls_layer.load_state_dict(checkpoint['cls_layer'])
+
+    # Save best models
+    torch.save(encoder_f, "checkpoints/encoder_ln1.pth")
+    torch.save(encoder_b, "checkpoints/encoder_ln2.pth")
+    torch.save(cls_layer, "checkpoints/ln_cls_layer.pth")
+
+if __name__ == "__main__":
+    main()

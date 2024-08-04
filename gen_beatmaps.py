@@ -57,11 +57,11 @@ def get_audio_features(x, sr, bpm, position, offset):
 # audio_file = "春分.mp3"
 
 
-BPM = 122
+BPM = 120
 offset = 0
-song_name = "惊蛰"
-artist = "音阙诗听 / 王梓钰"
-audio_file = "惊蛰.mp3"
+song_name = "01138_Circles"
+artist = "Void"
+audio_file = "Helper/1173_PostMalo-01138_Circles-PRO-Hard.mp3"
 
 x, sr = librosa.load(audio_file, sr=20000)
 print(x.shape)
@@ -301,6 +301,6 @@ mc_data["note"] = notes
 with open("generated_with_ai.mc", "w") as f:
     json.dump(mc_data, f)
 
-with zipfile.ZipFile("generated-with-ai.mcz", 'w') as z:
+with zipfile.ZipFile("01138_Circles.mcz", 'w') as z:
     z.write("generated_with_ai.mc")
     z.write(audio_file)
